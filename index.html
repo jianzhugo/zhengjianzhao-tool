@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<title>证件照工具 - 尺寸修改 / 换底色 / 相纸排版</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<!-- ========== 桌面版布局 ========== -->
+<div class="desktop-only">
+<header>
+  <svg class="logo" width="40" height="40" viewBox="0 0 64 64"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b7cf6"/><stop offset="1" stop-color="#6a5ae0"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#lg)"/><rect x="12" y="16" width="40" height="32" rx="4" fill="#fff" opacity="0.95"/><circle cx="24" cy="28" r="5" fill="#6a5ae0"/><path d="M18 42c0-4 3-6 6-6s6 2 6 6" fill="none" stroke="#6a5ae0" stroke-width="2.5" stroke-linecap="round"/><rect x="34" y="24" width="14" height="2.5" rx="1.25" fill="#b3a9ec"/><rect x="34" y="30" width="14" height="2.5" rx="1.25" fill="#b3a9ec"/><rect x="34" y="36" width="10" height="2.5" rx="1.25" fill="#b3a9ec"/></svg>
+  <div>
+    <h1>AI 证件照工具</h1>
+    <p>尺寸修改 · AI 换底色 · 文件大小控制 · 相纸排版打印 —— 全部本地完成，照片不上传</p>
+  </div>
+</header>
+
+<div class="container">
+  <!-- 左侧控制面板 -->
+  <div class="panel controls">
+    <div class="step">
+      <div class="step-title"><span class="num">1</span>打开照片</div>
+      <div class="dropzone" id="dropzone">
+        <div class="dz-icon">📤</div>
+        <div class="dz-main">点击或拖拽照片到这里</div>
+        <div class="dz-sub" id="dzSub">支持 JPG / PNG / WEBP ｜ 建议相对正面照，手机自拍即可</div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" class="hidden">
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">2</span>选择证件规格</div>
+      <div class="spec-grid" id="specGrid"></div>
+      <div class="row" id="customSizeRow" style="margin-top:10px;display:none;">
+        <label>宽(px)</label><input type="number" id="customW" min="1">
+        <label>高(px)</label><input type="number" id="customH" min="1">
+      </div>
+      <div class="mm-info" id="mmInfo"></div>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">3</span>选择证件底色</div>
+      <div class="swatch-wrap">
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="hex-row">
+        <input type="color" id="customColor" value="#ffffff">
+        <input type="text" id="hexColor" value="#FFFFFF" maxlength="7" spellcheck="false">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:#4c4569;white-space:nowrap;">
+          <input type="checkbox" id="keepBg"> 保留原背景
+        </label>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">4</span>手动调整（所见即所得预览）</div>
+      <div class="slider-row"><label>缩放</label><input type="range" id="adjZoom" min="50" max="250" value="100"><span class="val" id="adjZoomVal">100%</span></div>
+      <div class="slider-row"><label>水平</label><input type="range" id="adjX" min="-100" max="100" value="0"><span class="val" id="adjXVal">0</span></div>
+      <div class="slider-row"><label>垂直</label><input type="range" id="adjY" min="-100" max="100" value="0"><span class="val" id="adjYVal">0</span></div>
+      <div class="toggle-row" style="margin-top:10px;"><input type="checkbox" id="beautyOn"><label for="beautyOn" style="cursor:pointer;">轻度去瑕疵美化（不联网）</label></div>
+      <div class="slider-row"><label>美化强度</label><input type="range" id="beautyStrength" min="0" max="100" value="0"><span class="val" id="beautyStrengthVal">0%</span></div>
+      <button id="btnResetAdj" class="secondary">重置调整</button>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">5</span>一键 AI 生成</div>
+      <button id="btnAI" disabled>一键 AI 生成（抠图 + 定位）</button>
+      <div class="hint">先把 规格、底色、微调 都选好，再到这里统一生成成品。首次使用需联网下载 AI 模型（约 88MB，之后离线可用）；或勾选「保留原背景」后点「仅裁剪排版」跳过 AI。</div>
+      <button id="btnCropOnly" class="secondary" style="margin-top:8px;" disabled>仅裁剪排版（不抠图）</button>
+      <div class="status" id="status">请先打开照片。</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">6</span>导出证件照</div>
+      <div class="row">
+        <label style="min-width:auto;">格式</label>
+        <select id="exportFormat" style="flex:1;min-width:72px;width:auto;">
+          <option value="jpeg">JPG</option>
+          <option value="png">PNG</option>
+        </select>
+        <label style="min-width:auto;">大小</label>
+        <input type="number" id="maxKB" min="0" value="0" style="width:72px;flex:0 0 72px;">
+        <span style="font-size:12px;white-space:nowrap;">KB(0=不限)</span>
+      </div>
+      <button id="btnExport" class="green" disabled>导出证件照</button>
+      <div class="mm-info" id="exportInfo"></div>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">7</span>批量导出（规格 × 底色）</div>
+      <div class="batch-pick">
+        <div class="lbl">选择规格（可多选）：</div>
+        <div class="batch-chips" id="batchSpecChips"></div>
+      </div>
+      <div class="batch-pick">
+        <div class="lbl">选择底色（可多选）：</div>
+        <div class="batch-chips" id="batchBgChips"></div>
+      </div>
+      <div class="batch-preview" id="batchPreview"></div>
+      <div class="batch-sum" id="batchSum">勾选规格与底色，预览组合并一键打包下载。</div>
+      <button id="btnBatchExport" class="green" style="margin-top:8px;">打包下载全部（ZIP）</button>
+    </div>
+  </div>
+
+  <!-- 右侧预览 -->
+  <div class="preview">
+    <div class="tabs">
+      <button class="tab active" data-tab="photo">证件照预览</button>
+      <button class="tab" data-tab="print">相纸排版打印</button>
+    </div>
+
+    <div class="tab-body active" id="tab-photo">
+      <div class="seg-row" id="segRow">
+        <button class="seg-btn active" data-seg="after">成品</button>
+        <button class="seg-btn" data-seg="before">原图</button>
+        <button class="seg-btn" data-seg="compare">前后对比</button>
+      </div>
+      <div id="viewAfter" style="display:flex;flex-direction:column;align-items:center;width:100%;">
+        <div class="canvas-holder"><canvas id="resultCanvas" width="295" height="413"></canvas></div>
+      </div>
+      <div id="viewBefore" style="display:none;flex-direction:column;align-items:center;width:100%;">
+        <div class="canvas-holder"><canvas id="rawCanvas" width="295" height="413"></canvas></div>
+      </div>
+      <div id="viewCompare" style="display:none;flex-direction:column;align-items:center;width:100%;">
+        <div class="ba-wrap" id="baWrap">
+          <canvas id="baBefore" width="295" height="413"></canvas>
+          <canvas id="baAfter" class="ba-after" width="295" height="413"></canvas>
+          <div class="ba-line" id="baLine"></div>
+          <div class="ba-handle" id="baHandle">‹›</div>
+          <div class="ba-tag left">原图</div>
+          <div class="ba-tag right">成品</div>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:10px;">左侧第 4 步生成后，此处显示最终效果；「前后对比」拖动中缝查看改动。① 生成 ② 换底色 ③ 微调 ④ 美化。</div>
+    </div>
+
+    <div class="tab-body" id="tab-print">
+      <div class="print-controls">
+        <div class="field"><label>相纸</label>
+          <select id="paperSize">
+            <option value="4R">6寸相纸 (102×152mm)</option>
+            <option value="A6">A6 (105×148mm)</option>
+            <option value="A5">A5 (148×210mm)</option>
+            <option value="A4" selected>A4 (210×297mm)</option>
+          </select>
+        </div>
+        <div class="field"><label>相纸方向</label>
+          <select id="paperOrient">
+            <option value="portrait">竖向</option>
+            <option value="landscape">横向</option>
+          </select>
+        </div>
+        <div class="field"><label>照片方向</label>
+          <select id="photoOrient">
+            <option value="portrait">竖向</option>
+            <option value="landscape">横向</option>
+          </select>
+        </div>
+        <button id="btnLayout">生成排版</button>
+        <button id="btnExportPrint" class="green" disabled>导出排版图</button>
+      </div>
+      <div class="print-info" id="printInfo">生成证件照后，点击「生成排版」。排版按 300 DPI 输出，可直接送打印店或用家用打印机打印。</div>
+      <div class="canvas-holder"><canvas id="printCanvas" width="600" height="400"></canvas></div>
+    </div>
+  </div>
+</div>
+</div><!-- /desktop-only -->
+
+<!-- ========== 移动端向导式布局 ========== -->
+<div class="mobile-only">
+<div class="mobile-app" id="mobileApp">
+  <!-- 顶部栏 -->
+  <div class="mobile-head">
+    <button class="mh-back" id="mhBack">&#x2190;</button>
+    <span class="mh-title">AI 证件照</span>
+    <span class="mh-step">步骤 <span id="mhStepNum">1</span>/7</span>
+  </div>
+
+  <!-- 步骤内容 -->
+  <div class="mobile-body" id="mobileBody">
+
+    <!-- 步骤 1：打开照片 -->
+    <div class="mobile-step-view active" data-step="1">
+      <div class="mobile-section-title">打开照片</div>
+      <div class="mobile-section-desc">选择一张正面照，手机自拍即可</div>
+      <div class="mobile-dropzone" id="mobileDropzone">
+        <div class="mdz-icon">📷</div>
+        <div class="mdz-main">点击选择照片</div>
+        <div class="mdz-sub">支持 JPG / PNG / WEBP</div>
+        <div class="mdz-loaded hidden" id="mdzLoaded"></div>
+      </div>
+      <input type="file" id="mobileFileInput" accept="image/*" class="hidden">
+    </div>
+
+    <!-- 步骤 2：选择规格 -->
+    <div class="mobile-step-view" data-step="2">
+      <div class="mobile-section-title">选择证件规格</div>
+      <div class="mobile-section-desc">选择需要的证件照尺寸</div>
+      <div class="mobile-spec-grid" id="mobileSpecGrid"></div>
+      <div class="mobile-spec-custom" id="mobileCustomRow" style="display:none;">
+        <input type="number" id="mobileCustomW" min="1" placeholder="宽(px)">
+        <input type="number" id="mobileCustomH" min="1" placeholder="高(px)">
+      </div>
+      <div class="mobile-mminfo" id="mobileMmInfo"></div>
+    </div>
+
+    <!-- 步骤 3：选择底色 -->
+    <div class="mobile-step-view" data-step="3">
+      <div class="mobile-section-title">选择证件底色</div>
+      <div class="mobile-section-desc">选择背景颜色或保留原背景</div>
+      <div class="mobile-swatch-wrap">
+        <div class="mobile-swatches" id="mobileSwatches"></div>
+      </div>
+      <div class="mobile-hex-row">
+        <input type="color" id="mobileCustomColor" value="#ffffff">
+        <input type="text" id="mobileHexColor" value="#FFFFFF" maxlength="7" spellcheck="false">
+      </div>
+      <label class="mobile-checkbox">
+        <input type="checkbox" id="mobileKeepBg"> 保留原背景（不抠图）
+      </label>
+    </div>
+
+    <!-- 步骤 4：手动调整（含美化） -->
+    <div class="mobile-step-view" data-step="4">
+      <div class="mobile-section-title">手动调整</div>
+      <div class="mobile-section-desc">调整缩放、位置与美化，所见即所得</div>
+      <div class="mobile-seg-row" id="mobileSegRow">
+        <button class="seg-btn active" data-mseg="after">成品</button>
+        <button class="seg-btn" data-mseg="before">原图</button>
+      </div>
+      <div class="mobile-canvas-wrap"><canvas id="mobileCanvas" width="295" height="413"></canvas></div>
+      <div class="mobile-canvas-wrap hidden" id="mobileRawWrap"><canvas id="mobileRawCanvas" width="295" height="413"></canvas></div>
+      <div class="mobile-sliders">
+        <div class="mobile-slider-row"><label>缩放</label><input type="range" id="mobileAdjZoom" min="50" max="250" value="100"><span class="msv" id="mobileAdjZoomVal">100%</span></div>
+        <div class="mobile-slider-row"><label>水平</label><input type="range" id="mobileAdjX" min="-100" max="100" value="0"><span class="msv" id="mobileAdjXVal">0</span></div>
+        <div class="mobile-slider-row"><label>垂直</label><input type="range" id="mobileAdjY" min="-100" max="100" value="0"><span class="msv" id="mobileAdjYVal">0</span></div>
+      </div>
+      <label class="mobile-toggle-row">
+        <input type="checkbox" id="mobileBeautyOn"> 轻度去瑕疵美化（不联网）
+      </label>
+      <div class="mobile-slider-row"><label>美化强度</label><input type="range" id="mobileBeautyStrength" min="0" max="100" value="0"><span class="msv" id="mobileBeautyStrengthVal">0%</span></div>
+      <button class="mobile-btn secondary" id="mobileResetAdj">重置调整</button>
+    </div>
+
+    <!-- 步骤 5：AI 生成 -->
+    <div class="mobile-step-view" data-step="5">
+      <div class="mobile-section-title">AI 生成证件照</div>
+      <div class="mobile-section-desc">首次使用需联网下载 AI 模型（约 88MB），之后可离线使用</div>
+      <button class="mobile-btn primary" id="mobileBtnAI" disabled>一键 AI 生成（抠图 + 定位）</button>
+      <button class="mobile-btn secondary" id="mobileBtnCropOnly" disabled>仅裁剪排版（不抠图）</button>
+      <div class="mobile-status" id="mobileStatus">请先打开照片。</div>
+    </div>
+
+    <!-- 步骤 6：导出 -->
+    <div class="mobile-step-view" data-step="6">
+      <div class="mobile-section-title">导出证件照</div>
+      <div class="mobile-export-row">
+        <label>格式</label>
+        <select id="mobileExportFormat">
+          <option value="jpeg">JPG</option>
+          <option value="png">PNG</option>
+        </select>
+      </div>
+      <div class="mobile-export-row">
+        <label>大小上限</label>
+        <input type="number" id="mobileMaxKB" min="0" value="0" placeholder="0=不限">
+        <span>KB</span>
+      </div>
+      <button class="mobile-btn primary green" id="mobileBtnExport" disabled>导出证件照</button>
+      <div class="mobile-export-info" id="mobileExportInfo"></div>
+      <button class="mobile-btn secondary" id="mobileBtnPrintToggle" style="margin-top:8px;" disabled>相纸排版打印</button>
+      <div id="mobilePrintSection" style="display:none;margin-top:12px;">
+        <div class="mobile-export-row">
+          <label>相纸</label>
+          <select id="mobilePaperSize">
+            <option value="4R">6寸 (102×152mm)</option>
+            <option value="A6">A6 (105×148mm)</option>
+            <option value="A5">A5 (148×210mm)</option>
+            <option value="A4" selected>A4 (210×297mm)</option>
+          </select>
+        </div>
+        <div class="mobile-export-row">
+          <label>相纸方向</label>
+          <select id="mobilePaperOrient">
+            <option value="portrait">竖向</option>
+            <option value="landscape">横向</option>
+          </select>
+        </div>
+        <div class="mobile-export-row">
+          <label>照片方向</label>
+          <select id="mobilePhotoOrient">
+            <option value="portrait">竖向</option>
+            <option value="landscape">横向</option>
+          </select>
+        </div>
+        <button class="mobile-btn primary" id="mobileBtnLayout" style="margin-top:8px;">生成排版</button>
+        <div class="mobile-export-info" id="mobilePrintInfo">点击「生成排版」预览相纸排版效果。</div>
+        <div class="mobile-canvas-wrap"><canvas id="mobilePrintCanvas" width="600" height="400"></canvas></div>
+        <button class="mobile-btn primary green" id="mobileBtnExportPrint" style="margin-top:8px;" disabled>导出排版图</button>
+      </div>
+      <div class="mobile-batch-hint" style="font-size:12px;color:#8a;background:#f3;background:#f3f1fb;border-radius:8px;padding:10px 12px;margin-top:12px;line-height:1.5;">
+        <p>如需批量导出不同背景、尺寸，请点击下方"批量导出"按钮。</p>
+        <p>注：相纸排版打印不支持批量导出。</p>
+      </div>
+    </div>
+
+    <!-- 步骤 7：批量导出 -->
+    <div class="mobile-step-view" data-step="7">
+      <div class="mobile-section-title">批量导出</div>
+      <div class="mobile-section-desc">选择规格与底色，逐张下载或打包下载</div>
+      <div class="lbl" style="font-size:12px;color:#8a87a8;margin:8px 0 6px;">选择规格（可多选）：</div>
+      <div class="mobile-batch-chips" id="mobileBatchSpecChips"></div>
+      <div class="lbl" style="font-size:12px;color:#8a87a8;margin:8px 0 6px;">选择底色（可多选）：</div>
+      <div class="mobile-batch-chips" id="mobileBatchBgChips"></div>
+      <div class="mobile-batch-preview" id="mobileBatchPreview"></div>
+      <div class="mobile-batch-sum" id="mobileBatchSum">勾选规格与底色，选择下载方式。</div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="mobile-btn primary green" id="mobileBtnBatchExport" style="flex:1;">逐张下载</button>
+        <button class="mobile-btn secondary" id="mobileBtnBatchZip" style="flex:1;">打包下载(ZIP)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 底部导航 -->
+  <div class="mobile-foot">
+    <div class="mf-indicators" id="stepDots"></div>
+    <div class="mf-buttons">
+      <button class="mobile-btn half secondary" id="prevStep" disabled>上一步</button>
+      <button class="mobile-btn half primary" id="nextStep">下一步</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// face-api.js 多 CDN 源容错加载：jsdelivr 在部分网络（公司网/校园网/部分运营商）下不可达时自动换源
+(function () {
+  const urls = [
+    "https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js",
+    "https://fastly.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js",
+    "https://gcore.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js",
+    "https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js",
+  ];
+  (function tryLoad(i) {
+    if (i >= urls.length) { console.warn("face-api.js 所有 CDN 源均加载失败，将跳过人脸检测（不影响 AI 抠图）"); return; }
+    const s = document.createElement("script");
+    s.src = urls[i];
+    s.onload = () => console.log("face-api.js 已加载：" + urls[i]);
+    s.onerror = () => tryLoad(i + 1);
+    document.head.appendChild(s);
+  })(0);
+})();
+</script>
+<!-- JS 模块按依赖顺序加载（defer 保证 DOM 就绪后按序执行） -->
+<script defer src="js/config.js"></script>
+<script defer src="js/image-processing.js"></script>
+<script defer src="js/ai.js"></script>
+<script defer src="js/render.js"></script>
+<script defer src="js/export.js"></script>
+<script defer src="js/desktop-ui.js"></script>
+<script defer src="js/mobile-ui.js"></script>
+<footer>
+  <div class="brand">原创 · <span>長青</span> 🫱🏼‍🫲🏻 移动端适配 · <span><a href="https://home.shuichang.cn" target="_blank">水常</a></span></div>
+  <div class="desc">把复杂的 AI 讲给普通人的智能体 🌱 本证件照工具由 長青 自制 · 全程本地处理，照片不上传</div>
+  <div class="contact">遇到问题？关注公众号 <strong>AI扫盲班长·長青</strong>，直接与作者聊聊 👋</div>
+  <div class="tag">📮 也可以关注 ⌈建筑G⌋ 公众号</div>
+</footer>
+</body>
+</html>
