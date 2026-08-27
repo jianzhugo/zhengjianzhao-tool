@@ -109,21 +109,33 @@ async function segmentImage(img) {
       else if (p.status === "initiate")
         setStatus("正在加载抠图模型…");
     };
-    // RMBG-1.4 模型：hf-mirror 国内可达，失败自动换 huggingface.co；
-    // fp16（约88MB）遮罩质量优于 q8 量化版，每个镜像内失败自动回退 q8
+    // RMBG-1.4 模型权重走 remoteHost（hf-mirror 国内可达，失败自动换 huggingface.co）；
+    // fp16（约88MB）遮罩质量优于 q8 量化版，每个镜像内失败自动回退 q8。
+    // 注意：ONNX 运行时的 WASM 二进制默认从 JS 包所在 CDN 的 dist 目录拉取，那个源可能
+    // 在国产浏览器/部分手机网络下被卡住，即使模型权重能下载也会报 fetch/network 错，
+    // 因此这里把 wasmPaths 也纳入多源容错，三者（模型源 × dtype × wasm源）逐个组合重试。
     const HOSTS = ["https://hf-mirror.com", "https://huggingface.co"];
     const DTYPES = ["fp16", "q8"];
+    const WASM_BASES = [
+      "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
+      "https://fastly.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
+      "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
+      "https://unpkg.com/@huggingface/transformers@3.8.1/dist/",
+    ];
     let lastErr = null;
     outer: for (const host of HOSTS) {
       T.env.remoteHost = host;
       for (const dtype of DTYPES) {
-        try {
-          __segPipe = await T.pipeline("background-removal", "briaai/RMBG-1.4", { dtype, progress_callback: progress });
-          console.info(`抠图模型加载成功：${dtype} @ ${host}，${state.isMobile ? "移动端" : "桌面端"}`);
-          break outer;
-        } catch (e) {
-          lastErr = e;
-          console.warn(`抠图模型加载失败（${host} / ${dtype}），换源重试`, e);
+        for (const wasmBase of WASM_BASES) {
+          try {
+            if (T.env.backends?.onnx?.wasm) T.env.backends.onnx.wasm.wasmPaths = wasmBase;
+            __segPipe = await T.pipeline("background-removal", "briaai/RMBG-1.4", { dtype, progress_callback: progress });
+            console.info(`抠图模型加载成功：${dtype} @ ${host} | wasm: ${wasmBase}，${state.isMobile ? "移动端" : "桌面端"}`);
+            break outer;
+          } catch (e) {
+            lastErr = e;
+            console.warn(`抠图模型加载失败（${host} / ${dtype} / ${wasmBase}），换源重试`, e);
+          }
         }
       }
     }
