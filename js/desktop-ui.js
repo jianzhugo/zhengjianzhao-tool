@@ -160,10 +160,14 @@ async function runAI() {
   } catch (e) {
     console.error(e);
     const msg = (e && e.message) || String(e);
+    const b = detectBrowser();
     const isNet = /fetch|network|网络/i.test(msg);
-    setStatus("AI 处理失败：" + msg + (isNet
-      ? "\n这是网络问题：AI 模型需要从网上下载。请确认已联网，建议用 Edge/Chrome 直接打开本文件（不要在微信里直接打开），公司/校园网可能拦截了模型下载，可换手机热点重试。"
-      : "") + "\n也可勾选「保留原背景」后用「仅裁剪排版」（不需要联网）。", true);
+    const browserHint = b.restricted
+      ? `\n检测到${b.name}，可能不支持 AI 模型所需的 ES Module 动态导入或 WebAssembly。请换用 Chrome / Edge / Safari 浏览器打开本页面。`
+      : (isNet
+        ? "\n这是网络问题：AI 模型需要从网上下载。请确认已联网，建议用 Edge/Chrome 直接打开本文件（不要在微信里直接打开），公司/校园网可能拦截了模型下载，可换手机热点重试。"
+        : "");
+    setStatus("AI 处理失败：" + msg + browserHint + "\n也可勾选「保留原背景」后用「仅裁剪排版」（不需要联网）。", true);
   } finally {
     state.aiBusy = false;
     $("btnAI").disabled = false;

@@ -1,6 +1,26 @@
 'use strict';
 // 证件照工具 - AI 人脸检测与抠图模型
 
+// ==================== 浏览器检测 ====================
+function detectBrowser() {
+  const ua = navigator.userAgent;
+  // 夸克、UC、QQ浏览器、360浏览器、搜狗浏览器等国产浏览器内核可能限制 ES Module 动态导入或 WASM
+  const restricted = [
+    { pattern: /Quark|quark/i, name: "夸克浏览器" },
+    { pattern: /UCBrowser|UC\s/i, name: "UC浏览器" },
+    { pattern: /QQBrowser|QQ/i, name: "QQ浏览器" },
+    { pattern: /360SE|360EE|Qihoo/i, name: "360浏览器" },
+    { pattern: /SE\s|Sogou/i, name: "搜狗浏览器" },
+    { pattern: /LieBao/i, name: "猎豹浏览器" },
+    { pattern: /Baidu/i, name: "百度浏览器" },
+    { pattern: /MicroMessenger/i, name: "微信内置浏览器" },
+  ];
+  for (const b of restricted) {
+    if (b.pattern.test(ua)) return { name: b.name, restricted: true };
+  }
+  return { name: null, restricted: false };
+}
+
 async function ensureFaceModel() {
   if (state.faceModelReady) return true;
   if (typeof faceapi === "undefined") return false;
@@ -27,18 +47,53 @@ async function ensureFaceModel() {
 let __segPipe = null;
 
 // transformers.js AI 运行时：多 CDN 源容错（jsdelivr 被部分网络拦截时自动换源）
+// 优先用 ES Module 动态 import()，失败后回退 script 标签加载 UMD 构建（兼容夸克/UC等）
 async function importTransformers() {
-  const urls = [
+  // 方式1：ES Module 动态 import()
+  const esmUrls = [
     "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
     "https://fastly.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
     "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
     "https://unpkg.com/@huggingface/transformers@3.8.1",
   ];
   let lastErr = null;
-  for (const u of urls) {
-    try { return await import(u); } catch (e) { lastErr = e; console.warn("transformers.js 加载失败，换源重试", u, e); }
+  for (const u of esmUrls) {
+    try { return await import(u); } catch (e) { lastErr = e; console.warn("transformers.js ES Module 加载失败，换源重试", u, e); }
   }
-  throw lastErr || new Error("AI 组件加载失败");
+  // 方式2：script 标签加载 UMD 构建（夸克/UC 等不支持动态 import() 时的 fallback）
+  const umdUrls = [
+    "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
+    "https://fastly.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
+    "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
+    "https://unpkg.com/@huggingface/transformers@3.8.1/dist/transformers.min.js",
+  ];
+  console.warn("ES Module 动态加载全部失败，尝试 script 标签 fallback …");
+  for (const u of umdUrls) {
+    try {
+      await loadScript(u);
+      if (window.transformers) {
+        console.info("transformers.js UMD 加载成功", u);
+        return window.transformers;
+      }
+    } catch (e) { lastErr = e; console.warn("UMD 加载失败，换源重试", u, e); }
+  }
+  // 两种方式均失败，给出浏览器检测提示
+  const b = detectBrowser();
+  const hint = b.restricted
+    ? `检测到${b.name}，可能不支持 AI 模型所需的 ES Module 动态导入或 WebAssembly。请换用 Chrome / Edge / Safari 浏览器。`
+    : "AI 组件加载失败，请检查网络或换用 Chrome / Edge / Safari 浏览器。";
+  throw new Error(hint);
+}
+
+// 通过 script 标签加载 UMD 构建
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("script 加载失败: " + src));
+    document.head.appendChild(s);
+  });
 }
 
 async function segmentImage(img) {
