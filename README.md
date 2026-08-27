@@ -2,7 +2,9 @@
 
 一个 100% 本地运行的 AI 证件照工具：尺寸修改、AI 换底色、文件大小控制、相纸排版打印，**照片不上传任何服务器**。
 
-部署到任何静态托管即可使用：EdgeOne Pages、GitHub Pages、Vercel、Netlify、Cloudflare Pages 等。
+作者：AI扫盲班长·**長青**，移动端适配：**水常**。
+
+**部署到任何静态托管即可使用：EdgeOne Pages、GitHub Pages、Vercel、Netlify、Cloudflare Pages 等。
 
 ---
 
