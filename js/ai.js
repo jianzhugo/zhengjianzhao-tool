@@ -48,11 +48,10 @@ let __segPipe = null;
 
 // transformers.js AI 运行时：多 CDN 源容错（jsdelivr 被部分网络拦截时自动换源）
 // 优先用 ES Module 动态 import()，失败后回退 script 标签加载 UMD 构建（兼容夸克/UC等）。
-// npmmirror（淘宝）为国内高可达源，放在最前，适配手机流量/校园网等 jsdelivr 不可达的环境。
 async function importTransformers() {
   // 方式1：ES Module 动态 import()
+  // 注意：registry.npmmirror.com 对本包不在 unpkg 白名单内（FORBIDDEN），不可用
   const esmUrls = [
-    "https://registry.npmmirror.com/@huggingface/transformers/3.8.1/files/dist/transformers.js",
     "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
     "https://fastly.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
     "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
@@ -64,7 +63,6 @@ async function importTransformers() {
   }
   // 方式2：script 标签加载 UMD 构建（夸克/UC 等不支持动态 import() 时的 fallback）
   const umdUrls = [
-    "https://registry.npmmirror.com/@huggingface/transformers/3.8.1/files/dist/transformers.min.js",
     "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
     "https://fastly.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
     "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js",
@@ -136,8 +134,9 @@ async function segmentImage(img) {
       return Promise.race([p, raceTimeout]);
     };
     const DTYPES = ["fp16", "q8"];
+    // 注意：registry.npmmirror.com 对 @huggingface/transformers 不在 unpkg 白名单内，
+    // 所有文件请求均返回 FORBIDDEN，不可作为 WASM 源
     const WASM_BASES = [
-      "https://registry.npmmirror.com/@huggingface/transformers/3.8.1/files/dist/",
       "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
       "https://fastly.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
       "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
