@@ -104,14 +104,12 @@ async function segmentImage(img) {
   const T = await importTransformers();
   T.env.allowLocalModels = false;
   if (!__segPipe) {
-    // —— 三层防卡死机制 ——
-    // 1) 源连通性探测：加载前先拉一个 ~200B 的配置文件（8s 超时），不通的源直接跳过，
-    //    避免"每个组合都卡 90 秒"的长循环（手机流量下 hf-mirror 也可能被运营商劫持挂起）。
-    // 2) fetch 硬超时：patch window.fetch，任何远程请求 120s 无响应强制 abort（pipeline
-    //    options 不支持 signal，只能从 fetch 层面兜底，防止静默挂起）。
-    // 3) watchdog：无进度 60s 即换下一组合（Promise.race 超时）。
+    // —— 加载优先级 ——
+    // ① ModelScope（国内，阿里达摩院官方）→ ② hf-mirror → ③ huggingface.co；
+    // 每级内 fp16 优先、失败回退 q8。
+    // watchdog：60 秒无进度强制换下一源（pipeline 不支持 signal，用 Promise.race 超时）。
     let lastProgress = Date.now();
-    const STALL_MS = 60000; // 60 秒无进度视为卡住
+    const STALL_MS = 60000;
     const progress = p => {
       lastProgress = Date.now();
       const file = p.file || p.name || "";
@@ -124,28 +122,19 @@ async function segmentImage(img) {
         setStatus(`正在加载：${file || "抠图模型"}（若卡住将自动换源）…`);
       }
     };
-    // —— 机制2：fetch 硬超时 patch ——
-    const ORIG_FETCH = window.fetch.bind(window);
-    const FETCH_TIMEOUT_MS = 120000;
-    const patchedFetch = (input, init = {}) => {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(new Error("网络请求超时（120秒无响应）")), FETCH_TIMEOUT_MS);
-      return ORIG_FETCH(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    // watchdog 包装：pipeline 卡住时 reject，进入外层 catch 换源
+    const withWatchdog = (dtype) => {
+      let stallTimer = null;
+      const raceTimeout = new Promise((_, reject) => {
+        stallTimer = setInterval(() => {
+          if (Date.now() - lastProgress > STALL_MS)
+            reject(new Error(`加载卡住超过 ${STALL_MS / 1000} 秒（无进度）`));
+        }, 5000);
+      });
+      const p = T.pipeline("background-removal", "briaai/RMBG-1.4", { dtype, progress_callback: progress });
+      p.catch(() => {}).finally(() => clearInterval(stallTimer));
+      return Promise.race([p, raceTimeout]);
     };
-    // —— 机制1：源连通性探测 ——
-    async function probeHost(host) {
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 8000);
-        const res = await ORIG_FETCH(`${host}/briaai/RMBG-1.4/resolve/main/preprocessor_config.json`, { signal: ctrl.signal, cache: "no-store" });
-        clearTimeout(t);
-        return res.ok;
-      } catch (e) { console.warn(`[源探测] ${host} 不可达：`, e && e.message); return false; }
-    }
-    // RMBG-1.4 模型权重走 remoteHost（hf-mirror 国内可达，失败自动换 huggingface.co）；
-    // fp16（约88MB）遮罩质量优于 q8 量化版，每个镜像内失败自动回退 q8。
-    // ONNX 运行时 WASM 二进制走 npm CDN（默认跟随 JS 包所在源），同样纳入多源容错。
-    const ALL_HOSTS = ["https://hf-mirror.com", "https://huggingface.co"];
     const DTYPES = ["fp16", "q8"];
     const WASM_BASES = [
       "https://registry.npmmirror.com/@huggingface/transformers/3.8.1/files/dist/",
@@ -154,47 +143,62 @@ async function segmentImage(img) {
       "https://gcore.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/",
       "https://unpkg.com/@huggingface/transformers@3.8.1/dist/",
     ];
+    const REMOTE_SRCS = [
+      { name: "modelscope", host: "https://modelscope.cn/models", pathTemplate: "{model}/resolve/master/", probeFile: "config.json" },
+      { name: "hf-mirror", host: "https://hf-mirror.com" },
+      { name: "huggingface", host: "https://huggingface.co" },
+    ];
     let lastErr = null;
+
+    // fetch 硬超时 patch：任何远程请求 120s 无响应强制 abort，防止静默挂起
+    const ORIG_FETCH = window.fetch.bind(window);
+    const patchedFetch = (input, init = {}) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(new Error("网络请求超时（120秒无响应）")), 120000);
+      return ORIG_FETCH(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    };
     window.fetch = patchedFetch;
     try {
       setStatus("正在检测可用的模型源（约需几秒）…");
-      const HOSTS = [];
-      for (const h of ALL_HOSTS) if (await probeHost(h)) HOSTS.push(h);
-      console.info("[源探测] 可用模型源：", HOSTS.length ? HOSTS : "无");
-      if (!HOSTS.length)
-        throw new Error("当前网络无法访问任何模型源（hf-mirror.com / huggingface.co 均不可达）。请切换 WiFi/手机热点，或换 Chrome/Edge 浏览器后重试。");
-      outer: for (const host of HOSTS) {
-        if (host !== HOSTS[0]) setStatus(`模型源切换为：${host.replace(/^https:\/\//, "")}（前一源失败）…`);
-        T.env.remoteHost = host;
+      const DEFAULT_TPL = T.env.remotePathTemplate;
+      const usable = [];
+      for (const s of REMOTE_SRCS) {
+        const url = `${s.host}/briaai/RMBG-1.4/resolve/${s.pathTemplate ? "master/" : "main/"}${s.probeFile || "preprocessor_config.json"}`;
+        let ok = true;
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 8000);
+          const res = await ORIG_FETCH(url, { signal: ctrl.signal, cache: "no-store" });
+          clearTimeout(t);
+          ok = res.ok;
+        } catch (e) { ok = false; console.warn(`[源探测] ${s.host} 不可达：`, e && e.message); }
+        if (ok) usable.push(s);
+      }
+      console.info("[源探测] 可用模型源：", usable.map(s => s.name));
+      if (!usable.length)
+        throw new Error("当前网络无法访问任何模型源。建议：① 切换 WiFi/手机热点；② 换 Chrome/Edge 浏览器后重试。");
+      outer: for (const s of usable) {
+        setStatus(`模型源：${s.name}${s !== usable[0] ? "（前一源失败）" : ""}…`);
+        T.env.remoteHost = s.host;
+        T.env.remotePathTemplate = s.pathTemplate || DEFAULT_TPL;
         for (const dtype of DTYPES) {
           for (const wasmBase of WASM_BASES) {
             lastProgress = Date.now();
-            let stallTimer = null;
-            // 机制3：Promise.race 无进度超时，卡住时 reject 进入 catch 换源
-            const raceTimeout = new Promise((_, reject) => {
-              stallTimer = setInterval(() => {
-                if (Date.now() - lastProgress > STALL_MS)
-                  reject(new Error(`加载卡住超过 ${STALL_MS / 1000} 秒（无进度）`));
-              }, 5000);
-            });
             try {
               if (T.env.backends?.onnx?.wasm) T.env.backends.onnx.wasm.wasmPaths = wasmBase;
-              console.info(`[模型加载] 尝试组合：${host} / ${dtype} / wasm:${wasmBase}`);
-              __segPipe = await Promise.race([
-                T.pipeline("background-removal", "briaai/RMBG-1.4", { dtype, progress_callback: progress }),
-                raceTimeout,
-              ]);
-              clearInterval(stallTimer);
-              console.info(`抠图模型加载成功：${dtype} @ ${host} | wasm: ${wasmBase}，${state.isMobile ? "移动端" : "桌面端"}`);
+              console.info(`[模型加载] 尝试组合：${s.name} / ${dtype} / wasm:${wasmBase}`);
+              __segPipe = await withWatchdog(dtype);
+              console.info(`抠图模型加载成功：${dtype} @ ${s.name} | wasm: ${wasmBase}，${state.isMobile ? "移动端" : "桌面端"}`);
               break outer;
             } catch (e) {
-              clearInterval(stallTimer);
               lastErr = e;
-              console.warn(`抠图模型加载失败（${host} / ${dtype} / ${wasmBase}），换源重试`, e);
+              __segPipe = null;
+              console.warn(`抠图模型加载失败（${s.name} / ${dtype} / ${wasmBase}），换源重试`, e);
             }
           }
         }
       }
+      T.env.remotePathTemplate = DEFAULT_TPL;
     } finally {
       window.fetch = ORIG_FETCH; // 恢复原始 fetch，避免影响后续正常请求
     }
