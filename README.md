@@ -4,7 +4,7 @@
 
 作者：AI扫盲班长·**長青**，移动端适配：**水常**。
 
-**部署到任何静态托管即可使用：EdgeOne Pages、GitHub Pages、Vercel、Netlify、Cloudflare Pages 等。
+**部署到任何静态托管即可使用**：EdgeOne Pages、GitHub Pages、Vercel、Netlify、Cloudflare Pages 等。
 
 ---
 
