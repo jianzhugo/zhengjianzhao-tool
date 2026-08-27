@@ -104,13 +104,20 @@ async function segmentImage(img) {
   const T = await importTransformers();
   T.env.allowLocalModels = false;
   if (!__segPipe) {
+    // —— 卡住检测（watchdog）：某些网络下 WASM/配置文件 fetch 会静默挂起，不报错也不推进。
+    // 超过 STALL_MS 无任何进展就用 AbortController 中止当前 pipeline（底层 fetch），
+    // 触发 reject 进入 catch 自动换下一个源，避免无限等死。
+    let lastProgress = Date.now();
+    let controller = null; // 当前尝试的 AbortController
+    const STALL_MS = 90000; // 90 秒无进度视为卡住
     const progress = p => {
+      lastProgress = Date.now();
       if (p.status === "progress" && p.total)
-        setStatus(`正在下载抠图模型… ${Math.round((p.loaded || 0) / p.total * 100)}%`);
+        setStatus(`正在下载抠图模型… ${Math.round((p.loaded || 0) / p.total * 100)}%（若长期不动可换网络或等下一源）`);
       else if (p.status === "done")
         setStatus("模型下载完成，正在编译初始化（首次需 1~3 分钟，请耐心等待）…");
       else if (p.status === "initiate")
-        setStatus("正在加载抠图模型…");
+        setStatus("正在加载抠图模型（初始化中，若卡住将自动换源）…");
     };
     // RMBG-1.4 模型权重走 remoteHost（hf-mirror 国内可达，失败自动换 huggingface.co）；
     // fp16（约88MB）遮罩质量优于 q8 量化版，每个镜像内失败自动回退 q8。
@@ -128,15 +135,26 @@ async function segmentImage(img) {
     ];
     let lastErr = null;
     outer: for (const host of HOSTS) {
+      if (host !== HOSTS[0]) setStatus(`等待模型源：${host.replace(/^https:\/\//, "")}（可能较慢，正在换源）…`);
       T.env.remoteHost = host;
       for (const dtype of DTYPES) {
         for (const wasmBase of WASM_BASES) {
+          lastProgress = Date.now();
+          controller = new AbortController();
+          const stallTimer = setInterval(() => {
+            if (Date.now() - lastProgress > STALL_MS) {
+              console.warn(`模型加载卡住超过 ${STALL_MS / 1000}s（${host}/${dtype}/${wasmBase}），尝试终止并换源`);
+              try { controller.abort(); } catch (_) {}
+            }
+          }, 5000);
           try {
             if (T.env.backends?.onnx?.wasm) T.env.backends.onnx.wasm.wasmPaths = wasmBase;
-            __segPipe = await T.pipeline("background-removal", "briaai/RMBG-1.4", { dtype, progress_callback: progress });
+            __segPipe = await T.pipeline("background-removal", "briaai/RMBG-1.4", { dtype, progress_callback: progress, signal: controller.signal });
+            clearInterval(stallTimer);
             console.info(`抠图模型加载成功：${dtype} @ ${host} | wasm: ${wasmBase}，${state.isMobile ? "移动端" : "桌面端"}`);
             break outer;
           } catch (e) {
+            clearInterval(stallTimer);
             lastErr = e;
             console.warn(`抠图模型加载失败（${host} / ${dtype} / ${wasmBase}），换源重试`, e);
           }
